@@ -1,0 +1,80 @@
+on:
+  push:
+    tags:
+      - "v*" # Push events to matching v*, i.e. v1.0, v20.15.10
+
+name: Create Release
+
+jobs:
+  release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    outputs:
+      upload_url: ${{ steps.create_release.outputs.upload_url }}
+    steps:
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref }}
+          release_name: Release ${{ github.ref }}
+          body: |
+            Changes in this Release
+            - First Change
+            - Second Change
+          draft: true
+          prerelease: false
+  build:
+    needs: release
+    name: Build leonardo
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target_name: leonardo
+            asset_name: leonardo-linux-amd64.tar.gz
+            content_type: application/gzip
+          # - os: macos-latest
+          #   target_name: leonardo
+          #   asset_name: leonardo-macos-amd64.tar.gz
+          #   content_type: application/gzip
+          - os: windows-latest
+            target_name: leonardo.exe
+            asset_name: leonardo-windows-amd64.zip
+            content_type: application/zip
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+        with:
+          submodules: recursive
+      - name: Install latest nightly
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: nightly
+          override: true
+          components: rustfmt, clippy
+      - name: Build project
+        run: cargo +nightly build --release
+      - name: Tar release on Unix
+        if: runner.os != 'Windows'
+        run: |
+          mv ./target/release/${{ matrix.target_name }} ${{ matrix.target_name }}
+          tar czf ${{ matrix.asset_name }} README.md LICENSE-MIT LICENSE-APACHE ${{ matrix.target_name }}
+      - name: Zip release on Windows
+        if: runner.os == 'Windows'
+        uses: papeloto/action-zip@v1
+        with:
+          files: README.md LICENSE-MIT LICENSE-APACHE ./target/release/${{ matrix.target_name }}
+          dest: ${{ matrix.asset_name }}
+      - name: Upload binary to release
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ needs.release.outputs.upload_url }}
+          asset_path: ${{ matrix.asset_name }}
+          asset_name: ${{ matrix.asset_name }}
+          asset_content_type: ${{ matrix.content_type }}
